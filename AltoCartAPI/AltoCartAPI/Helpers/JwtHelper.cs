@@ -3,6 +3,7 @@ using AltoCartAPI.TemporaryModels;
 using Microsoft.IdentityModel.Tokens;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.Entity;
 using System.Data.Entity.Core.Common.CommandTrees.ExpressionBuilder;
 using System.Data.Entity.Core.Common.EntitySql;
@@ -14,6 +15,7 @@ using System.Net.Http;
 using System.Security.Claims;
 using System.Security.Cryptography.Xml;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web;
 using System.Web.Services.Description;
 using System.Web.SessionState;
@@ -64,48 +66,46 @@ namespace AltoCartAPI.Helpers
 
         public static RefreshToken GenerateRefreshTokenForBigPerson(BigPerson bigPerson, int expireDay = 15)
         {
-            AltoCartDB db = new AltoCartDB();
-
-            var EncodedKey = Encoding.UTF8.GetBytes(jwtKey);
-
-            var secTokenDesc = new SecurityTokenDescriptor()
-            {
-                Subject = new ClaimsIdentity(new[]
-                {
-                    new Claim(ClaimTypes.NameIdentifier, bigPerson.GuidID.ToString())
-                }),
-                Expires = DateTime.UtcNow.AddDays(expireDay),
-                Issuer = issuer,
-                Audience = audience,
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(EncodedKey), SecurityAlgorithms.HmacSha256Signature)
-            };
-
-            var secTokenHandler = new JwtSecurityTokenHandler();
-            var createdToken = secTokenHandler.CreateToken(secTokenDesc);
-            var Token = secTokenHandler.WriteToken(createdToken);
+            //AltoCartDB db = new AltoCartDB();
 
             try
             {
-                RefreshToken token = new RefreshToken()
+                using (AltoCartDB db = new AltoCartDB())
                 {
-                    ExpireDate = secTokenDesc.Expires.Value,
-                    Token = Token,
-                    UserGuid = bigPerson.GuidID,
-                };
-                db.RefreshTokens.Add(token);
-                db.SaveChanges();
-                return new RefreshToken()
-                {
-                    ExpireDate = secTokenDesc.Expires.Value,
-                    Token = Token,
-                    UserGuid = bigPerson.GuidID,
+                    var EncodedKey = Encoding.UTF8.GetBytes(jwtKey);
+
+                    var secTokenDesc = new SecurityTokenDescriptor()
+                    {
+                        Subject = new ClaimsIdentity(new[]
+                        {
+                    new Claim(ClaimTypes.NameIdentifier, bigPerson.GuidID.ToString())
+                }),
+                        Expires = DateTime.UtcNow.AddDays(expireDay),
+                        Issuer = issuer,
+                        Audience = audience,
+                        SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(EncodedKey), SecurityAlgorithms.HmacSha256Signature)
+                    };
+
+                    var secTokenHandler = new JwtSecurityTokenHandler();
+                    var createdToken = secTokenHandler.CreateToken(secTokenDesc);
+                    var Token = secTokenHandler.WriteToken(createdToken);
+
+                    RefreshToken refToken = new RefreshToken()
+                    {
+                        ExpireDate = secTokenDesc.Expires.Value,
+                        Token = Token,
+                        UserGuid = bigPerson.GuidID,
+                    };
+                    db.RefreshTokens.Add(refToken);
+                    db.SaveChanges();
+                    return refToken;
+
                 };
             }
             catch (Exception ex)
             {
-                throw new Exception(ex.Message);
+                throw new Exception($"Error generating refresh token for big person {bigPerson.GuidID}. Message: {ex.Message}", ex);
             }
-
             //return new RefreshToken()
             //{
             //    ExpireDate = secTokenDesc.Expires.Value,
@@ -115,7 +115,6 @@ namespace AltoCartAPI.Helpers
         }
 
 
-        //public static RefreshToken ValidateRefreshToken(Claim bigPersonsGuid)
         public static string ValidateRefreshToken(Guid bigPersonsGuid)
         {
             if (bigPersonsGuid == Guid.Empty)
@@ -208,6 +207,238 @@ namespace AltoCartAPI.Helpers
                 throw new ArgumentException("Invalid Access Token");
 
         }
+
+        //public static async Task<string> ValidateRefreshTokenForOwner(Guid guidID)
+        public static string ValidateRefreshTokenForOwner(Guid guidID)
+        {
+            if (guidID == null)
+                throw new ArgumentNullException("Guid ID is null. JWTHelper/ValidateRefreshTokenForOwner ");
+
+            try
+            {
+                using (AltoCartDB db = new AltoCartDB())
+                {
+
+                    //if (!await db.Owners.AnyAsync(x => x.Guid_ID == guidID))
+                    if (!db.Owners.Any(x => x.Guid_ID == guidID))
+                            throw new NoNullAllowedException("Owner not found in database");
+
+                    RefreshToken refreshToken = db.RefreshTokens.FirstOrDefault(x => x.UserGuid == guidID);
+                    if (refreshToken == null)
+                    {
+                        var _newRefreshToken = JwtHelper.GenerateRefreshTokenForOwner(db.Owners.FirstOrDefault(x => x.Guid_ID == guidID));
+                        return _newRefreshToken.Token;
+                    }
+
+                    if (refreshToken.ExpireDate > DateTime.UtcNow)
+                    {
+                        return refreshToken.Token;
+                    }
+                    else
+                        return null;
+
+                }
+
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error accuired (JWTHelper/ValidateRefreshTokenForOwner). {ex.InnerException?.Message ?? ex.Message} ");
+            }
+
+        }
+
+        public static ClaimsPrincipal ValidateAccessTokenForOwner(string accessToken)
+        {
+
+            var EncodedKey = Encoding.UTF8.GetBytes(jwtKey);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var jwtToken = tokenHandler.ReadJwtToken(accessToken);
+            if (jwtToken != null)
+            {
+                var valTokenParameters = new TokenValidationParameters()
+                {
+                    ValidateLifetime = true,
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(EncodedKey),
+                    ValidateIssuerSigningKey = true,
+                    ValidAudience = audience,
+                    ValidIssuer = issuer,
+                };
+
+                try
+                {
+                    ClaimsPrincipal claims = tokenHandler.ValidateToken(accessToken, valTokenParameters, out var validatedToken);
+
+                    if (validatedToken.ValidFrom > DateTime.UtcNow)
+                    {
+                        return claims;
+                    }
+                    else
+                    {
+                        //Claim identity = claims.Claims.First(x => x.Type == ClaimTypes.NameIdentifier);
+                        //ClaimsIdentity identity = (ClaimsIdentity)claims.Identity;
+                        //Guid guidID = identity.FindFirst(ClaimTypes.NameIdentifier)?.Value; 
+
+                        ClaimsIdentity identity = (ClaimsIdentity)claims.Identity;
+                        Guid guidID = Guid.Parse(identity.FindFirst(ClaimTypes.NameIdentifier).Value);
+                        //Task<string> result = ValidateRefreshTokenForOwner(guidID);
+                        string result = ValidateRefreshTokenForOwner(guidID);
+
+                        if (result != null)
+                        {
+                            return claims;
+                        }
+                        else
+                        {
+                            throw new Exception("Refresh token is expired or invalid.");
+                        }
+
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new ArgumentException("Invalid Access Token", ex);
+                }
+
+            }
+            else
+                throw new ArgumentException("Invalid Access Token");
+        }
+
+
+        //public static async Task<string> GenerateAccessTokenForOwner(Owner owner, int expireMinute = 30)
+        public static string GenerateAccessTokenForOwner(Owner owner, int expireMinute = 30)
+        {
+            var encodedKey = Encoding.UTF8.GetBytes(jwtKey);
+
+            try
+            {
+                using (AltoCartDB db = new AltoCartDB())
+                {
+                    var claims = new List<Claim>
+                     {
+                        new Claim("ClaimGuid", Guid.NewGuid().ToString()),
+                        new Claim(ClaimTypes.NameIdentifier, owner.Guid_ID.ToString()),
+                        new Claim(ClaimTypes.Name, owner.OwnerName),
+                        new Claim(ClaimTypes.Surname, owner.OwnerSurname),
+                        //new Claim("City", owner.Cities.CityName),
+                        //new Claim("City", Convert.ToString(await db.Cities.FirstOrDefaultAsync(x => x.ID == owner.City_ID).Result.CityName)),
+                        new Claim("City", Convert.ToString(db.Cities.FirstOrDefault(x => x.ID == owner.City_ID).CityName)),
+                        new Claim(ClaimTypes.DateOfBirth, owner.BirthDate.ToString("yyyy-MM-dd")),
+                        new Claim(ClaimTypes.Email, owner.OwnerEmail),
+                        new Claim("IsActive" , owner.IsActive.ToString()),
+                        //new Claim(ClaimTypes.Country, owner.Countries.CountryName),
+                        new Claim(ClaimTypes.Country, Convert.ToString(db.Countries.FirstOrDefault(x => x.ID == owner.Country_ID).CountryName)),
+                        new Claim("IsDeleted" , owner.IsDeleted.ToString()),
+                        new Claim("ExpireDate" , DateTime.UtcNow.AddMinutes(expireMinute).ToString()),
+                    };
+
+                    ClaimsIdentity claimsIdentity = new ClaimsIdentity(claims);
+
+                    SecurityTokenDescriptor secToken = new SecurityTokenDescriptor
+                    {
+                        Issuer = issuer,
+                        Audience = audience,
+                        Subject = claimsIdentity,
+                        Expires = Convert.ToDateTime(claimsIdentity.Claims.First(x => x.Type == "ExpireDate").Value),
+                        SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(encodedKey), SecurityAlgorithms.HmacSha256)
+                    };
+
+                    JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+                    var createdToken = tokenHandler.CreateToken(secToken);
+                    return tokenHandler.WriteToken(createdToken);
+                }
+
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static RefreshToken GenerateRefreshTokenForOwner(Owner owner, int expireDay = 15)
+        {
+            #region Old without USING
+
+            //AltoCartDB db = new AltoCartDB();
+
+            //var EncodedKey = Encoding.UTF8.GetBytes(jwtKey);
+
+            //var secTokenDesc = new SecurityTokenDescriptor()
+            //{
+            //    Subject = new ClaimsIdentity(new[]
+            //    {
+            //        new Claim(ClaimTypes.NameIdentifier, owner.Guid_ID.ToString())
+            //    }),
+            //    Expires = DateTime.UtcNow.AddDays(expireDay),
+            //    Issuer = issuer,
+            //    Audience = audience,
+            //    SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(EncodedKey), SecurityAlgorithms.HmacSha256Signature)
+            //};
+
+            //var secTokenHandler = new JwtSecurityTokenHandler();
+            //var createdToken = secTokenHandler.CreateToken(secTokenDesc);
+            //var Token = secTokenHandler.WriteToken(createdToken);
+
+            //try
+            //{
+            //    RefreshToken refToken = new RefreshToken()
+            //    {
+            //        ExpireDate = secTokenDesc.Expires.Value,
+            //        Token = Token,
+            //        UserGuid = owner.Guid_ID,
+            //    };
+            //    db.RefreshTokens.Add(refToken);
+            //    db.SaveChanges();
+            //    return refToken;
+            //}
+            //catch (Exception ex)
+            //{
+            //    throw new Exception(ex.Message);
+            //}
+
+            #endregion
+
+            try
+            {
+                // Otomatik olarak dispose işlemini yapar.
+                using (AltoCartDB db = new AltoCartDB())
+                {
+                    var encodedKey = Encoding.UTF8.GetBytes(jwtKey);
+
+                    var secTokenDesc = new SecurityTokenDescriptor()
+                    {
+                        Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, owner.Guid_ID.ToString()) }),
+                        Expires = DateTime.UtcNow.AddDays(expireDay),
+                        Issuer = issuer,
+                        Audience = audience,
+                        SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(encodedKey), SecurityAlgorithms.HmacSha256)
+                    };
+
+                    var secTokenHandler = new JwtSecurityTokenHandler();
+                    var createdToken = secTokenHandler.CreateToken(secTokenDesc);
+                    var token = secTokenHandler.WriteToken(createdToken);
+
+                    RefreshToken refreshToken = new RefreshToken()
+                    {
+                        ExpireDate = secTokenDesc.Expires.Value,
+                        Token = token,
+                        UserGuid = Guid.Parse(secTokenDesc.Subject.Claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier).Value),
+                    };
+
+                    db.RefreshTokens.Add(refreshToken);
+                    db.SaveChanges();
+
+                    return refreshToken;
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error generating refresh token for owner {owner.Guid_ID}. Message: {ex.Message}", ex);
+            }
+        }
+
 
         //public static string GenerateAccessToken(Guid userGuidID, int expireMinute = 30)
         //{

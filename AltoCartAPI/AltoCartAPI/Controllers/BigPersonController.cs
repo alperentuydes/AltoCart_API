@@ -278,7 +278,7 @@ namespace AltoCartAPI.Controllers
 
         [Route("create_new_big_person")]
         [HttpPost]
-        public async Task<IHttpActionResult> CreateBigPerson(BigPerson bigPerson)
+        public async Task<IHttpActionResult> CreateBigPerson([FromBody] BigPerson bigPerson)
         {
             if (bigPerson == null)
                 return Content(HttpStatusCode.BadRequest, "Parameters can not be null");
@@ -299,7 +299,13 @@ namespace AltoCartAPI.Controllers
                 await db.SaveChangesAsync();
                 var createdRefreshToken = JwtHelper.GenerateRefreshTokenForBigPerson(bigPerson);
                 var createdAccessToken = JwtHelper.GenerateAccessTokenForBigPerson(bigPerson);
-                return Content(HttpStatusCode.OK, $"Big Person successfully added to database. Refresh Token => {createdRefreshToken} / Access Token => {createdAccessToken}");
+                //return Content(HttpStatusCode.OK, $"Big Person successfully added to database. Refresh Token => {createdRefreshToken} / Access Token => {createdAccessToken}");
+                return Content(HttpStatusCode.OK, new
+                {
+                    Message = "Successfully Created",
+                    CreatedAccessToken = createdAccessToken,
+                    CreatedRefreshToken = createdRefreshToken,
+                });
             }
             catch (DbUpdateException dbUpdateEx)
             {
@@ -315,7 +321,7 @@ namespace AltoCartAPI.Controllers
 
         [Route("login_big_person")]
         [HttpPost]
-        public async Task<IHttpActionResult> LoginBigPerson(TempBigPerson tempBigPerson)
+        public async Task<IHttpActionResult> LoginBigPerson([FromBody] TempBigPerson tempBigPerson)
         {
             if (tempBigPerson == null)
                 return Content(HttpStatusCode.BadRequest, "Parameters can not be null");
