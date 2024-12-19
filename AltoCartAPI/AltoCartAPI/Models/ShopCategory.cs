@@ -11,6 +11,7 @@ namespace AltoCartAPI.Models
         public int ID { get; set; }
         public string ShopCategoryName { get; set; }
         public string ShopCategoryDescription { get; set; }
+        public bool IsDeleted { get; set; }
         public ICollection<Shop> Shops { get; set; }
 
     }

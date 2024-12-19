@@ -38,6 +38,10 @@ namespace AltoCartAPI.Helpers
             var claims = new List<Claim>()
             {
                 new Claim("jti", Guid.NewGuid().ToString()),
+
+                //new Claim("role", "BigPerson"), // Burası sonradan eklendi
+                new Claim(ClaimTypes.Role, "BigPerson"), // Burası sonradan eklendi
+
                 new Claim(ClaimTypes.NameIdentifier, bigPerson.GuidID.ToString()),
                 new Claim(ClaimTypes.Name, bigPerson.Username),
                 new Claim(ClaimTypes.Email, bigPerson.Email),
@@ -149,8 +153,10 @@ namespace AltoCartAPI.Helpers
                 throw new Exception("Invalid GuidID for Big Person (Big Person not found)");
         }
 
-        public static ClaimsPrincipal ValidateAccessToken(string accessToken)
+        public static ClaimsPrincipal ValidateAccessToken(string accessToken)// GELEN ACCESSTOKEN DOLULUK KONTROLU??
         {
+            // BURASI DÜZGÜN BİR ŞEKİLDE ÇALIŞIYOR. TOKEN SÜRESİ GEÇMİŞ İSE HATA VERİYOR OLMASI GEREKTİĞİ GİBİ!! HİÇ BİR SIKINTI YOK
+
             var EncodedKey = Encoding.UTF8.GetBytes(jwtKey);
             var tokenHandler = new JwtSecurityTokenHandler();
 
@@ -172,7 +178,7 @@ namespace AltoCartAPI.Helpers
                 {
                     ClaimsPrincipal claims = tokenHandler.ValidateToken(accessToken, valTokenParameters, out var validatedToken);
 
-                    if (validatedToken.ValidFrom > DateTime.UtcNow)
+                    if (validatedToken.ValidFrom > DateTime.UtcNow) // SANKİ BURAYI HEP GEÇİYOR... FALSE DÖNÜYOR
                     {
                         return claims;
                     }

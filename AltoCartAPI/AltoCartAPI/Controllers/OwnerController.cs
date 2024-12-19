@@ -1,7 +1,9 @@
 ﻿using AltoCartAPI.Helpers;
 using AltoCartAPI.Models;
 using AltoCartAPI.TemporaryModels;
+using Microsoft.IdentityModel.Tokens;
 using System;
+using System.CodeDom;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.Entity;
@@ -11,8 +13,10 @@ using System.Data.Entity.Validation;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Security.AccessControl;
+using System.Security.Authentication;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Web.Http;
@@ -343,6 +347,86 @@ namespace AltoCartAPI.Controllers
                 return Content(HttpStatusCode.InternalServerError, $"Error accuired (Exception). {ex.InnerException.Message ?? ex.Message}");
             }
 
+        }
+
+        //[HttpPost]
+        //public async Task<IHttpActionResult> AddShop([FromBody] TempShop tempShop)
+        //{
+        //    Guid ownerGuid = CheckAccessToken();
+        //    if (ownerGuid == null)
+        //        return Content(HttpStatusCode.Forbidden, "Guid id is null");
+
+        //    using (db = new AltoCartDB())
+        //    {
+        //        try
+        //        {
+        //            Owner owner = await db.Owners.FirstOrDefaultAsync(x => x.Guid_ID == ownerGuid);
+        //            if (owner == null)
+        //                return Content(HttpStatusCode.Forbidden, "Guid id is not found in Owner Table");
+
+        //            if (owner.IsDeleted)
+        //                return Content(HttpStatusCode.Forbidden, "Not Found Account");
+
+        //            if (!owner.IsActive)
+        //                return Content(HttpStatusCode.Forbidden, "Your account is suspanded");
+
+                    
+
+        //        }
+        //        catch
+        //        {
+
+        //        }
+        //    }
+
+
+        //}
+
+        public Guid CheckAccessToken()
+        {
+            #region OLD
+
+            //var requestedTokenHeader = Request.Headers.Authorization;
+            //if (requestedTokenHeader == null || requestedTokenHeader.Scheme != "Bearer")
+            //    throw new SecurityTokenException("Access token is missing or invalid");
+
+            //string accessTokenParam = requestedTokenHeader.Parameter;
+            //var claimsPrincipal = JwtHelper.ValidateAccessTokenForOwner(accessTokenParam);
+
+            //var claim = (ClaimsIdentity)claimsPrincipal.Identity;
+
+            //if (claim == null)
+            //    throw new Exception("Access token's claims are null");
+
+            //string nameIdenifier = claim.FindFirst(ClaimTypes.NameIdentifier).Value;
+
+            //if (nameIdenifier == null)
+            //    throw new Exception("Guid ID is null");
+
+            //return nameIdenifier;
+
+            #endregion
+
+            AuthenticationHeaderValue requestedHeaderAuth = Request.Headers.Authorization;
+            if (requestedHeaderAuth == null || requestedHeaderAuth.Scheme != "Bearer")
+                throw new AuthenticationException("Token is missing or invalid");
+
+            string tokenParameter = requestedHeaderAuth.Parameter;
+            if (tokenParameter == null)
+                throw new Exception("Token parameters are null");
+
+            ClaimsPrincipal claimsPrincipal = JwtHelper.ValidateAccessTokenForOwner(tokenParameter);
+
+            if (claimsPrincipal == null)
+                throw new Exception("Claims principals are null");
+
+            ClaimsIdentity claim = (ClaimsIdentity)claimsPrincipal.Identity;
+
+            Guid guidID = Guid.Parse(claim.FindFirst(ClaimTypes.NameIdentifier).Value);
+            if (guidID == Guid.Empty)
+                throw new ArgumentNullException("Guid id is empty");
+
+            return guidID;
         }
 
     }
